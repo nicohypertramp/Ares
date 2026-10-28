@@ -3,6 +3,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#000000">
+<meta http-equiv="Cache-Control" content="no-cache">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}</style>
 </head><body>
 <title>ATLAS Training</title>
@@ -262,8 +263,15 @@ function pauseEars(){try{if(rec){rec.onend=null;rec.abort()}}catch(e){}rec=null}
 function spawnEar(){
   if(!listening||speaking||rec||!SR)return;
   try{
-    rec=new SR();rec.lang="fr-FR";rec.continuous=true;rec.interimResults=false;rec.maxAlternatives=1;
-    rec.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)hear(e.results[i][0].transcript)}};
+    rec=new SR();wakeSeen=0;wordSeen=0;rec.lang="fr-FR";rec.continuous=true;rec.interimResults=true;rec.maxAlternatives=1;
+    rec.onresult=e=>{
+      // iPhone : les phrases s'accumulent et la fin n'est pas toujours signalée -> on lit le dernier morceau, avec un délai de sécurité
+      let full="";for(let i=0;i<e.results.length;i++)full+=" "+e.results[i][0].transcript;
+      const last=e.results[e.results.length-1];
+      const ind=document.getElementById("heard");if(ind)ind.textContent="« "+full.trim().split(/\s+/).slice(-6).join(" ")+" »";
+      clearTimeout(earTimer);
+      if(last.isFinal)take(full);else earTimer=setTimeout(()=>take(full),900);
+    };
     rec.onerror=e=>{if(e.error==="not-allowed"||e.error==="service-not-allowed"){listening=false;lsSet("ares-ears",false);toast("Micro refusé. Autorise le micro pour Safari dans Réglages.");if(RUN)renderRun();else render()}};
     rec.onend=()=>{rec=null;if(listening&&!speaking)setTimeout(spawnEar,300)};
     rec.start();
@@ -271,9 +279,19 @@ function spawnEar(){
 }
 function norm(s){return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9' ]/g," ")}
 // "Atlas" est souvent transcrit "un res", "à res", "harès", "arrêt"... : on accepte toutes ces variantes
-const WAKE=/^(?:(?:ok|eh|he|hey|dis)\s+)?(?:atlas+e?|at las|hatlas|atlass|atla|atlase|ares+|hares+|aris|arez|ares?t|arest|arras|haras|a+ ?res+|ah res+|un res+|une res+|au res+|des res+|a rais|a re|ar es|arresse?|arese|arrese)\b/;
+const WAKE_ALTS="atlas+e?|at las|hatlas|atlass|atla|atlase|ares+|hares+|aris|arez|ares?t|arest|arras|haras|a+ ?res+|ah res+|un res+|une res+|au res+|des res+|a rais|a re|ar es|arresse?|arese|arrese";
+const WAKE=new RegExp("^(?:(?:ok|eh|he|hey|dis)\\s+)?(?:"+WAKE_ALTS+")\\b");
+const WAKE_ANY=new RegExp("\\b(?:"+WAKE_ALTS+")\\b","g");
+let earTimer=null,wakeSeen=0,wordSeen=0;
+function take(full){
+  const t=norm(full).replace(/\s+/g," ").trim();if(!t)return;
+  const words=t.split(" ");
+  const wakes=[...t.matchAll(WAKE_ANY)];
+  if(wakes.length>wakeSeen){wakeSeen=wakes.length;wordSeen=words.length;hear(t.slice(wakes[wakes.length-1].index));return}
+  if(words.length>wordSeen){const fresh=words.slice(wordSeen);wordSeen=words.length;if(fresh.length<=4)hear(fresh.join(" "))}
+}
 function hear(raw){
-  let t=norm(raw).replace(/\s+/g," ").trim();lastHeard=raw;const ind=document.getElementById("heard");if(ind)ind.textContent="« "+raw.trim()+" »";
+  let t=norm(raw).replace(/\s+/g," ").trim();lastHeard=raw;
   let c;const woke=WAKE.test(t);
   if(woke)c=t.replace(WAKE,"").trim();
   else if(t.split(" ").length<=4)c=t;   // phrase courte sans "Atlas" : acceptée si c'est une commande connue
